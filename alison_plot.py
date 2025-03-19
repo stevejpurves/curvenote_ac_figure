@@ -2,13 +2,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import seaborn as sns
+from scipy.ndimage import gaussian_filter1d
 
 from matplotlib.patches import FancyArrowPatch
 import matplotlib.colors as mcolors
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.cm as cm
-
-from ripple_detection.core import gaussian_smooth
 
 MM_TO_INCHES = 1.0 / 25.4
 TWO_COLUMN = 174.0 * MM_TO_INCHES
@@ -496,89 +495,27 @@ def _summarize_mua_sum(key, marks_xr):
     return multiunit_firing_rate  # .to_numpy().flatten()
 
 
-# # load some data from one epoch
-# def load_decode_ex_data(subject_id, nwb_file_name, epoch, all_rat_big_dfs_stable):
-#     """Load up many useful bits of data for a subject, day, epoch
+def gaussian_smooth(data, sigma, sampling_frequency, axis=0, truncate=8):
+    """1D convolution of the data with a Gaussian.
 
-#     Params
-#     ---------
-#     subject_id: str rat name
-#     nwb_file_name: str
-#     epoch: int
-#     all_rat_big_dfs_stable: dict of pd.DataFrame per subject with lots of aligned and parsed data
+    The standard deviation of the gaussian is in the units of the sampling
+    frequency. The function is just a wrapper around scipy's
+    `gaussian_filter1d`, The support is truncated at 8 by default, instead
+    of 4 in `gaussian_filter1d`
 
-#     Returns
-#     ----------
-#     acausal_results_summary: decoding info extracted as pd.DataFrame
-#     position_df: pd.DataFrame of 2d position
-#     linear_position_df: pd.DataFrame of linearized position
-#     multiunit_spike_rate_sum: updated mua array (overall, not per tet)
-#     time_slices: dict of slices for subsets of trial time
-#     subject_epoch_data: pd.DataFrame trimmed to relevant data
-#     """
-#     #     subject_id = 'j16'
-#     #     nwb_file_name = 'j1620210707_.nwb'
-#     interval_list_name = f"pos {epoch-1} valid times"  # not ideal
+    Parameters
+    ----------
+    data : array_like
+    sigma : float
+    sampling_frequency : int
+    axis : int, optional
+    truncate : int, optional
 
-#     classifier_param_name = "default_decoding_gpu"
+    Returns
+    -------
+    smoothed_data : array_like
 
-#     run = True
-#     well = False
-#     pre_sec = 0
-#     post_sec = 0
-
-#     epoch = (
-#         PosValidTimesToEpoch()
-#         & {"nwb_file_name": nwb_file_name, "pos_interval_list_name": interval_list_name}
-#     ).fetch1("epoch")
-
-#     cr_key = (
-#         ClusterlessResults
-#         & {
-#             "nwb_file_name": nwb_file_name,
-#             "interval_list_name": interval_list_name,
-#             "classifier_param_name": classifier_param_name,
-#         }
-#     ).fetch1("KEY")
-
-#     # get raw decode results
-#     filename = (ClusterlessResults & cr_key).fetch1(
-#         "clusterless_results_path"
-#     )  # of form: save_results_path + f'{nwb_file_name}_{track_graph_name}_{interval_list_name}_1D.nc'
-#     results = xr.open_dataset(filename)
-
-#     # alternative decode results with ahbeh and mua parsed
-#     acausal_results_summary = (
-#         ClusterlessAcausalResultsSummary & cr_key
-#     ).fetch1_dataframe()
-
-#     # position data, aligned to results and acausal results summary
-#     position_df, linear_position_df, marks_xr = _align_pos_linpos_marks_to_interval(
-#         cr_key
-#     )
-
-#     multiunit_spike_rate_sum = _summarize_mua_sum(cr_key, marks_xr)
-
-#     # get trial run time slices
-#     time_slices = {}
-#     for trial_number in range(1, 180):
-#         time_slice = trial_to_time_slice(
-#             nwb_file_name, results, epoch, trial_number, run, well, pre_sec, post_sec
-#         )
-#         time_slices[trial_number] = time_slice
-
-#     # from earlier data parsing into big df...
-#     subject_data = all_rat_big_dfs_stable[subject_id]
-#     subject_day_data = subject_data[subject_data["nwb_file_name"] == nwb_file_name]
-#     subject_epoch_data = subject_day_data[
-#         subject_day_data["interval_list_name"] == interval_list_name
-#     ]
-
-#     return (
-#         acausal_results_summary,
-#         position_df,
-#         linear_position_df,
-#         multiunit_spike_rate_sum,
-#         time_slices,
-#         subject_epoch_data,
-#     )
+    """
+    return gaussian_filter1d(
+        data, sigma * sampling_frequency, truncate=truncate, axis=axis, mode="constant"
+    )
