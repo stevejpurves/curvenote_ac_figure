@@ -8,10 +8,17 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import FancyArrowPatch
-from scipy.ndimage import gaussian_filter1d
 
 MM_TO_INCHES = 1.0 / 25.4
 TWO_COLUMN = 174.0 * MM_TO_INCHES
+
+ARROW_MUTATION_SCALE = 15
+AXIS_OFFSET = 10
+
+
+CUSTOM_CMAP = LinearSegmentedColormap.from_list(
+    "custom_PuBu", plt.get_cmap("PuBu")(np.linspace(0.3, 1, 100))
+)
 
 
 def set_seaborn_opts() -> None:
@@ -42,25 +49,25 @@ def set_seaborn_opts() -> None:
 
 
 def plot_event_v3_1_mua_ahbeh_speed(
-    event_dict,
-    subject_epoch_data,
-    linear_position_df,
-    position_df,
-    acausal_results_summary,
-    fig_path,
+    event_dict: dict,
+    subject_epoch_data: pd.DataFrame,
+    linear_position_df: pd.DataFrame,
+    position_df: pd.DataFrame,
+    acausal_results_summary: pd.DataFrame,
+    fig_path: str,
     mua=None,
-    save_fig=False,
-    nonlocal_cmap="custom",
-    default_cmap="PuBu",
-    shading_named_color="slateblue",
-    arrow_color="violet",
-    peri_nonlocal_time=0.2,
-    use_manual=True,
-    extra_hpd=False,
-    show_cbar_ticks=True,
-    min_nonlocal_duration_s=0.02,
-    between_bin_buffer_s=0.004,
+    save_fig: bool = False,
+    nonlocal_cmap: str = "custom",
+    default_cmap: str = "PuBu",
+    shading_named_color: str = "slateblue",
+    arrow_color: str = "violet",
+    peri_nonlocal_time: float = 0.2,
+    use_manual: bool = True,
+    extra_hpd: bool = False,
+    show_cbar_ticks: bool = True,
     debug=False,
+    *args,
+    **kwargs,
 ):
     """Plot 1d decoding data projected to 2d with colors.
 
@@ -69,10 +76,47 @@ def plot_event_v3_1_mua_ahbeh_speed(
     Also plots mua, ahead behind distance, and speed highlight the nonlocal time
     on the subplots below the position decoding plot. Keeps track of relevant
     rat, day, epoch, trial, and time information.
+
+    Parameters
+    ----------
+    event_dict : dict
+        Dictionary containing event information.
+    subject_epoch_data : pd.DataFrame
+        DataFrame containing subject epoch data.
+    linear_position_df : pd.DataFrame
+        DataFrame containing linear position data.
+    position_df : pd.DataFrame
+        DataFrame containing position data.
+    acausal_results_summary : pd.DataFrame
+        DataFrame containing acausal results summary data.
+    fig_path : str
+        Path to save the figure.
+    mua : pd.DataFrame, optional
+        Multiunit activity data. Default is None.
+    save_fig : bool, optional
+        Save the figure. Default is False.
+    nonlocal_cmap : str, optional
+        Colormap for nonlocal position. Default is 'custom'.
+    default_cmap : str, optional
+        Default colormap. Default is 'PuBu'.
+    shading_named_color : str, optional
+        Named color for shading. Default is 'slateblue'.
+    arrow_color : str, optional
+        Color for arrows. Default is 'violet'.
+    peri_nonlocal_time : float, optional
+        Time around nonlocal event. Default is 0.2.
+    use_manual : bool, optional
+        Use manual event times. Default is True.
+    extra_hpd : bool, optional
+    show_cbar_ticks : bool, optional
+        Show colorbar ticks. Default is True.
+    debug : bool, optional
+        Print values during run. Default is False.
     """
 
     set_seaborn_opts()
 
+    # --- Extract event information ---
     nwb_file_name = event_dict["nwb_file_name"]
     epoch = event_dict["epoch"]
     trial = event_dict["trial"]
@@ -92,7 +136,7 @@ def plot_event_v3_1_mua_ahbeh_speed(
     if debug:
         print(f"Duration: {duration}")
 
-    # Check masked data for out of bounds timepoints
+    # --- Check if event is within valid time range ---
     filtered_start, filtered_end = subject_epoch_data_filtered_seg.time.iloc[
         [0, -1]
     ]
@@ -107,6 +151,7 @@ def plot_event_v3_1_mua_ahbeh_speed(
             + f"{out_of_bounds}\n"
         )
 
+    # --- Declare figure and axes ---
     fig, axes = plt.subplots(
         nrows=4,
         ncols=1,
@@ -128,20 +173,24 @@ def plot_event_v3_1_mua_ahbeh_speed(
     if debug:
         print(heading)
 
-    # Plot track occupied positions
+    # --- Plot track occupied positions ---
     lin_pos_x = linear_position_df["projected_x_position"]
     lin_pos_y = linear_position_df["projected_y_position"]
+
     plot_track_and_trial_path(
         axes[0], lin_pos_x, lin_pos_y, time_slice, arrow_color
     )
     axes[0].axis("off")
     add_scale_bar(axes[0])
 
-    offset = 10
-    axes[0].set_xlim(lin_pos_x.min() - offset, lin_pos_x.max() + offset)
-    axes[0].set_ylim(lin_pos_y.min() - offset, lin_pos_y.max() + offset)
+    axes[0].set_xlim(
+        lin_pos_x.min() - AXIS_OFFSET, lin_pos_x.max() + AXIS_OFFSET
+    )
+    axes[0].set_ylim(
+        lin_pos_y.min() - AXIS_OFFSET, lin_pos_y.max() + AXIS_OFFSET
+    )
 
-    # get event times of df
+    # --- Plot event times ---
     event_filtered_data = filter_by_time_range(
         subject_epoch_data_filtered_seg, event_start_t, event_stop_t
     )
@@ -149,11 +198,6 @@ def plot_event_v3_1_mua_ahbeh_speed(
         event_filtered_data[
             ["actual_2d_x_projected_position", "actual_2d_y_projected_position"]
         ].T.values
-    )
-
-    # create custom colormap
-    custom_cmap = LinearSegmentedColormap.from_list(
-        "custom_PuBu", plt.get_cmap("PuBu")(np.linspace(0.3, 1, 100))
     )
 
     # plot nonlocal actual and mental pos
@@ -169,10 +213,11 @@ def plot_event_v3_1_mua_ahbeh_speed(
         s=50,
         marker="o",
         c=event_filtered_data.time - event_start_t,
-        cmap=custom_cmap if nonlocal_cmap == "custom" else default_cmap,
+        cmap=CUSTOM_CMAP if nonlocal_cmap == "custom" else default_cmap,
         label="Represented\nnon-local pos.",
         vmin=0,
     )
+
     # legend for actual and mental pos
     legend = axes[0].legend(
         bbox_to_anchor=(-0.03, 0.5), loc="lower left", frameon=False
@@ -182,10 +227,10 @@ def plot_event_v3_1_mua_ahbeh_speed(
         label.set_color(color)
 
     add_colorbar(
-        fig, duration, shading_named_color, custom_cmap, show_cbar_ticks
+        fig, duration, shading_named_color, CUSTOM_CMAP, show_cbar_ticks
     )
 
-    # filter by snippet time range
+    # --- Filter by snippet (peri-event) time range ---
     snippet_time_start = event_start_t - peri_nonlocal_time
     snippet_time_stop = event_stop_t + peri_nonlocal_time
     snippet_duration = snippet_time_stop - snippet_time_start
@@ -200,7 +245,7 @@ def plot_event_v3_1_mua_ahbeh_speed(
     if debug:
         print(len(snippet_times))
 
-    # for ahebeh actually only want the hpd valid times
+    # for ahebeh actually only want the hpd valid times. Head Pos Data??
     if extra_hpd:
         acausal_results_summary_hpd = acausal_results_summary[
             acausal_results_summary.spatial_coverage_50_hpd <= 50
@@ -235,7 +280,8 @@ def plot_event_v3_1_mua_ahbeh_speed(
         0, color="magenta", alpha=0.3, linewidth=1, zorder=0, linestyle="-"
     )
 
-    # mua old style which avgs across tets, new one sums
+    # --- Multiunit activity (MUA) and speed ---
+    # mua old style which avgs across tetrodes, new one sums
     if mua is not None:
         mua_snippet = filter_by_time_range(df=mua.firing_rate, **snip_kwargs)
         axes[1].fill_between(
@@ -272,46 +318,12 @@ def plot_event_v3_1_mua_ahbeh_speed(
     if axes[3].get_ylim()[1] <= 55:
         axes[3].set_ylim(0, 55)
 
-    axes[1].axvspan(
-        shaded_times[0],
-        shaded_times[-1],
-        ymin=0,
-        ymax=1,
-        color=shading_named_color,  # edgecolor="none",
-        alpha=0.5,
-        zorder=-100,
-        linestyle="None",
-    )
-    axes[3].axvspan(
-        shaded_times[0],
-        shaded_times[-1],
-        ymin=0,
-        ymax=1,
-        color=shading_named_color,  # edgecolor="none",
-        alpha=0.5,
-        zorder=-100,
-        linestyle="None",
-    )
-    axes[2].axvspan(
-        shaded_times[0],
-        shaded_times[-1],
-        ymin=0,
-        ymax=1,
-        color=shading_named_color,  # edgecolor="none",
-        alpha=0.5,
-        zorder=-100,
-        linestyle="None",
-    )
+    add_shaded_region(axes[1], shaded_times, shading_named_color)
+    add_shaded_region(axes[2], shaded_times, shading_named_color)
+    add_shaded_region(axes[3], shaded_times, shading_named_color)
 
-    axes[1].set_xlim(0, snippet_duration)
-    axes[1].set_xticks([])
-    axes[1].set_xticklabels([])
-    axes[1].set_xlabel("")
-
-    axes[2].set_xlim(0, snippet_duration)
-    axes[2].set_xticks([])
-    axes[2].set_xticklabels([])
-    axes[2].set_xlabel("")
+    set_null_x_axis(axes[1], snippet_duration)
+    set_null_x_axis(axes[2], snippet_duration)
 
     axes[3].set_xlim(0, snippet_duration)
     axes[3].set_ylim(bottom=0)
@@ -324,23 +336,16 @@ def plot_event_v3_1_mua_ahbeh_speed(
 
     plt.subplots_adjust(hspace=0.1)
 
-    pos_ax1 = axes[1].get_position()
-    pos_ax2 = axes[2].get_position()
-    pos_ax3 = axes[3].get_position()
-    new_left = 0.25
-    new_width = 0.6
+    set_axis_position(axes[1])
+    set_axis_position(axes[2])
+    set_axis_position(axes[3])
 
-    axes[1].set_position([new_left, pos_ax1.y0, new_width, pos_ax1.height])
-    axes[2].set_position([new_left, pos_ax2.y0, new_width, pos_ax2.height])
-    axes[3].set_position([new_left, pos_ax3.y0, new_width, pos_ax3.height])
-
+    # --- Save and show figure ---
     if save_fig:
         fig_name = (
             f"snippet_ex_decode_MUA_AHBEH_first{is_first_seg_of_trial}_"
             + f"{nwb_file_name[0:-5]}_{epoch}_{trial}"
             + f"_event{event_num_in_trial}_"
-            + f"mindur{min_nonlocal_duration_s}_"
-            + f"binbuff{between_bin_buffer_s}_"
             + f"perievent{peri_nonlocal_time}_"
             + f"shade{shading_named_color}_{event_start_t}_{event_stop_t}"
         )
@@ -356,8 +361,53 @@ def plot_event_v3_1_mua_ahbeh_speed(
     plt.show()
 
 
+def set_axis_position(
+    axis: plt.Axes, new_left: float = 0.25, new_width: float = 0.6
+):
+    pos = axis.get_position()
+    axis.set_position([new_left, pos.y0, new_width, pos.height])
+
+
+def set_null_x_axis(axis: plt.Axes, snippet_duration: float):
+    """Set null axis for plotting."""
+    axis.set_xlim(0, snippet_duration)
+    axis.set_xticks([])
+    axis.set_xticklabels([])
+    axis.set_xlabel("")
+
+
+def add_shaded_region(
+    ax: plt.Axes, shaded_times: np.array, shading_named_color: str
+):
+    """Add a shaded region to an axis.
+
+    Parameters
+    ----------
+    ax : plt.Axes
+        Axis to add the shaded region to.
+    shaded_times : np.array
+        Array of times to shade.
+    shading_named_color : str
+        Named color for shading.
+    """
+    ax.axvspan(
+        shaded_times[0],
+        shaded_times[-1],
+        ymin=0,
+        ymax=1,
+        color=shading_named_color,
+        alpha=0.5,
+        zorder=-100,
+        linestyle="None",
+    )
+
+
 def add_colorbar(
-    fig, duration, shading_named_color, custom_cmap, show_cbar_ticks
+    fig: plt.Figure,
+    duration: float,
+    shading_named_color: str,
+    custom_cmap: LinearSegmentedColormap,
+    show_cbar_ticks: bool,
 ):
     """Add a colorbar to the figure."""
     cbar_ax2 = fig.add_axes([0.45, 0.48, 0.15, 0.02])
@@ -382,18 +432,18 @@ def add_colorbar(
 
 def add_scale_bar(
     axes,
-    tick_length=3,
-    x_start=200,
-    y_position=58,
-    scale_bar_length=25,
+    tick_length: int = 3,
+    x_start: int = 200,
+    y_position: int = 58,
+    scale_bar_length: int = 25,
     color="lightgrey",
 ):
     """Add a scale bar to the plot, and label it."""
+    kwargs = dict(lw=1, color=color)
     axes.plot(
         [x_start, x_start + scale_bar_length],
         [y_position, y_position],
-        color=color,
-        lw=1,
+        **kwargs,
     )
     axes.text(
         x_start + scale_bar_length / 2,
@@ -406,14 +456,12 @@ def add_scale_bar(
     axes.plot(
         [x_start, x_start],
         [y_position - tick_length, y_position + tick_length * 0],
-        color=color,
-        lw=1,
+        **kwargs,
     )
     axes.plot(
         [x_start + scale_bar_length, x_start + scale_bar_length],
         [y_position - tick_length, y_position + tick_length * 0],
-        color=color,
-        lw=1,
+        **kwargs,
     )
 
 
@@ -454,7 +502,7 @@ def plot_track_and_trial_path(
         arrowstyle="-|>",
         color=arrow_color,
         lw=1,
-        mutation_scale=15,
+        mutation_scale=ARROW_MUTATION_SCALE,
         zorder=20000,
     )
     axes.add_patch(arrow)
@@ -508,67 +556,9 @@ def filter_epoch_data_by_event(
     return subject_epoch_data_filtered_seg
 
 
-def get_multiunit_population_firing_rate_sum(
-    multiunit: np.ndarray,
-    sampling_frequency: float,
-    smoothing_sigma: float = 0.015,
-):
-    """Calculates the multiunit population firing rate.
-
-    Parameters
-    ----------
-    multiunit : ndarray, shape (n_time, n_signals)
-        Binary array of multiunit spike times.
-    sampling_frequency : float
-        Number of samples per second.
-    smoothing_sigma : float or np.timedelta
-        Amount to smooth the firing rate over time. The default is
-        given assuming time is in units of seconds.
-
-    Returns
-    -------
-    multiunit_population_firing_rate : ndarray, shape (n_time,)
-    """
-    return gaussian_smooth(
-        multiunit.sum(axis=1) * sampling_frequency,
-        smoothing_sigma,
-        sampling_frequency,
-    )
-
-
 def filter_by_time_range(
     df: pd.DataFrame, start: float, stop: float, filter_col: str = "time"
 ) -> pd.DataFrame:
     """Filter a DataFrame by a time range."""
     this_col = df.index if filter_col == "index" else df[filter_col]
     return df[(this_col >= start) & (this_col <= stop)]
-
-
-def gaussian_smooth(data, sigma, sampling_frequency, axis=0, truncate=8):
-    """1D convolution of the data with a Gaussian.
-
-    The standard deviation of the gaussian is in the units of the sampling
-    frequency. The function is just a wrapper around scipy's
-    `gaussian_filter1d`, The support is truncated at 8 by default, instead
-    of 4 in `gaussian_filter1d`
-
-    Parameters
-    ----------
-    data : array_like
-    sigma : float
-    sampling_frequency : int
-    axis : int, optional
-    truncate : int, optional
-
-    Returns
-    -------
-    smoothed_data : array_like
-
-    """
-    return gaussian_filter1d(
-        data,
-        sigma * sampling_frequency,
-        truncate=truncate,
-        axis=axis,
-        mode="constant",
-    )

@@ -1,3 +1,5 @@
+"""Utility functions to load data from NWB files."""
+
 from pathlib import Path
 from typing import Tuple
 
