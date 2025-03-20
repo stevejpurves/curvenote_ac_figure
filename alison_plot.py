@@ -1,20 +1,21 @@
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-import seaborn as sns
-from scipy.ndimage import gaussian_filter1d
+"""Generate plots for nonlocal events."""
 
-from matplotlib.patches import FancyArrowPatch
-import matplotlib.colors as mcolors
-from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.cm as cm
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.patches import FancyArrowPatch
+from scipy.ndimage import gaussian_filter1d
 
 MM_TO_INCHES = 1.0 / 25.4
 TWO_COLUMN = 174.0 * MM_TO_INCHES
 
 
-def set_figure_defaults():
-    # Set background and fontsize
+def set_seaborn_opts() -> None:
+    """Set seaborn options for plotting."""
     rc_params = {
         "pdf.fonttype": 42,  # Make fonts editable in Adobe Illustrator
         "ps.fonttype": 42,  # Make fonts editable in Adobe Illustrator
@@ -38,7 +39,6 @@ def set_figure_defaults():
         context="paper",
         rc=rc_params,
     )
-    # font_scale=1.4)
 
 
 def plot_event_v3_1_mua_ahbeh_speed(
@@ -60,190 +60,115 @@ def plot_event_v3_1_mua_ahbeh_speed(
     show_cbar_ticks=True,
     min_nonlocal_duration_s=0.02,
     between_bin_buffer_s=0.004,
+    debug=False,
 ):
-    """Plot 1d decoding data projected to 2d
-    with colors for actual and decoded nonlocal position
-    color nonlocal position by time to illustrate sequence
-    for a longer time snippet than just the nonlocal event, plot mua, ahead behind distance, and speed
-    highlight the nonlocal time on the subplots below the position decoding plot
-    also keep track of relevant rat, day, epoch, trial, and time information
+    """Plot 1d decoding data projected to 2d with colors.
+
+    For actual and decoded nonlocal position color nonlocal position by time.
+    Illustrates sequence for a longer time snippet than just the nonlocal event.
+    Also plots mua, ahead behind distance, and speed highlight the nonlocal time
+    on the subplots below the position decoding plot. Keeps track of relevant
+    rat, day, epoch, trial, and time information.
     """
-    set_figure_defaults()
+
+    set_seaborn_opts()
 
     nwb_file_name = event_dict["nwb_file_name"]
-    # interval_list_name = event_dict['interval_list_name']
     epoch = event_dict["epoch"]
     trial = event_dict["trial"]
-    time_slice = slice(event_dict["time_slice_start"], event_dict["time_slice_stop"])
     is_first_seg_of_trial = event_dict["is_first_seg_of_trial"]
-    is_last_seg_of_trial = event_dict["is_last_seg_of_trial"]
-    e = event_dict["event_num_in_trial"]
-    if use_manual == True:
-        event_start_t = event_dict["event_start_t_manual"]
-        event_stop_t = event_dict["event_stop_t_manual"]
-    elif use_manual == False:
-        event_start_t = event_dict["event_start_t"]
-        event_stop_t = event_dict["event_stop_t"]
+    event_num_in_trial = event_dict["event_num_in_trial"]
 
-    start_t = position_df.iloc[time_slice].index[0]
-    stop_t = position_df.iloc[time_slice].index[-1]
-    subject_epoch_data = subject_epoch_data.reset_index()
-    subject_epoch_data_filtered = subject_epoch_data[
-        (subject_epoch_data.time >= start_t) & (subject_epoch_data.time <= stop_t)
+    time_slice = slice(
+        event_dict["time_slice_start"], event_dict["time_slice_stop"]
+    )
+
+    event_start_t, event_stop_t = extract_event_range(event_dict, use_manual)
+    duration = event_stop_t - event_start_t
+    subject_epoch_data_filtered_seg = filter_epoch_data_by_event(
+        event_dict, subject_epoch_data, position_df, debug=debug
+    )
+
+    if debug:
+        print(f"Duration: {duration}")
+
+    # Check masked data for out of bounds timepoints
+    filtered_start, filtered_end = subject_epoch_data_filtered_seg.time.iloc[
+        [0, -1]
     ]
-    if is_first_seg_of_trial:
-        subject_epoch_data_filtered_seg = subject_epoch_data_filtered[
-            subject_epoch_data_filtered.is_first_seg_of_trial == True
-        ]
-    elif is_last_seg_of_trial:
-        subject_epoch_data_filtered_seg = subject_epoch_data_filtered[
-            subject_epoch_data_filtered.is_last_seg_of_trial == True
-        ]
-    else:
-        raise Exception("only first OR last seg can be true, and one must be true")
-
-    if event_start_t < subject_epoch_data_filtered_seg.time.iloc[0]:
+    out_of_bounds = (
+        filtered_start
+        if event_start_t < filtered_start
+        else filtered_end if event_stop_t > filtered_end else None
+    )
+    if out_of_bounds and debug:
         print(
-            f"WARNING: Event start {event_start_t} is outside valid time {subject_epoch_data_filtered_seg.time.iloc[0]}\n"
-        )
-    if event_stop_t > subject_epoch_data_filtered_seg.time.iloc[-1]:
-        print(
-            f"WARNING: Event stop {event_stop_t} is outside valid time {subject_epoch_data_filtered_seg.time.iloc[-1]}\n"
+            f"WARNING: Event start {event_start_t} is outside valid time "
+            + f"{out_of_bounds}\n"
         )
 
-    duration = event_stop_t - event_start_t  # valid_segment_durations.values[e]
-    #     print(duration)
-    #     print(event_stop_t, event_start_t)
     fig, axes = plt.subplots(
         nrows=4,
         ncols=1,
         figsize=(TWO_COLUMN / 2, (TWO_COLUMN / 2) * (1.5)),
         gridspec_kw={"height_ratios": [5, 0.8, 0.8, 0.8]},
     )
+
+    heading = (
+        f"{nwb_file_name[0:-5]}, {epoch}, {trial}, E: {event_num_in_trial}, "
+        + f"first seg {bool(is_first_seg_of_trial)}"
+    )
     axes[0].set_title(
-        f"{nwb_file_name[0:-5]}, {epoch}, {trial}, E: {e}, first seg {True if is_first_seg_of_trial else False}\nNon-local event example, duration {np.round(duration*1000,2)} ms",
+        heading
+        + f"\nNon-local event example, duration {np.round(duration*1000,2)} ms",
         y=1.0,
         fontsize=4,
     )
-    print(
-        f"{nwb_file_name[0:-5]}, {epoch}, {trial}, E: {e}, first seg {True if is_first_seg_of_trial else False}"
-    )
+
+    if debug:
+        print(heading)
 
     # Plot track occupied positions
-    axes[0].scatter(
-        linear_position_df["projected_x_position"].iloc[::50],
-        linear_position_df["projected_y_position"].iloc[::50],
-        s=50,
-        color="lightgrey",
-        zorder=0,
-        label="_",
+    lin_pos_x = linear_position_df["projected_x_position"]
+    lin_pos_y = linear_position_df["projected_y_position"]
+    plot_track_and_trial_path(
+        axes[0], lin_pos_x, lin_pos_y, time_slice, arrow_color
     )
-    axes[0].set_aspect("equal")
-
-    # plot actual position during trial run time
-    axes[0].plot(
-        linear_position_df["projected_x_position"].iloc[time_slice],
-        linear_position_df["projected_y_position"].iloc[time_slice],
-        color=arrow_color,
-        lw=1,
-        zorder=1,
-        label="Trial path",
-        linestyle="--",
-    )
-    # draw arrow over last 50 linpos points to indicate motion direction for this trial
-    arrow_start = (
-        linear_position_df["projected_x_position"].iloc[time_slice].values[-50],
-        linear_position_df["projected_y_position"].iloc[time_slice].values[-50],
-    )
-    arrow_end = (
-        linear_position_df["projected_x_position"].iloc[time_slice].values[-1],
-        linear_position_df["projected_y_position"].iloc[time_slice].values[-1],
-    )
-    arrow = FancyArrowPatch(
-        arrow_start,
-        arrow_end,
-        arrowstyle="-|>",
-        color=arrow_color,
-        lw=1,
-        mutation_scale=15,
-        zorder=20000,
-    )
-    axes[0].add_patch(arrow)
-
-    # make a scale bar and label it
     axes[0].axis("off")
-    scale_bar_length = 25  # cm
-    x_start = 200
-    y_position = 58
-    tick_length = 3
-    axes[0].plot(
-        [x_start, x_start + scale_bar_length],
-        [y_position, y_position],
-        color="lightgrey",
-        lw=1,
-    )  # , zorder=5000)
-    axes[0].text(
-        x_start + scale_bar_length / 2,
-        y_position - 6,
-        f"{scale_bar_length} cm",
-        ha="center",
-        va="top",
-        color="lightgrey",
-    )
-    axes[0].plot(
-        [x_start, x_start],
-        [y_position - tick_length, y_position + tick_length * 0],
-        color="lightgrey",
-        lw=1,
-    )
-    axes[0].plot(
-        [x_start + scale_bar_length, x_start + scale_bar_length],
-        [y_position - tick_length, y_position + tick_length * 0],
-        color="lightgrey",
-        lw=1,
-    )
+    add_scale_bar(axes[0])
 
     offset = 10
-    axes[0].set_xlim(
-        linear_position_df["projected_x_position"].min() - offset,
-        linear_position_df["projected_x_position"].max() + offset,
-    )
-    axes[0].set_ylim(
-        linear_position_df["projected_y_position"].min() - offset,
-        linear_position_df["projected_y_position"].max() + offset,
-    )
+    axes[0].set_xlim(lin_pos_x.min() - offset, lin_pos_x.max() + offset)
+    axes[0].set_ylim(lin_pos_y.min() - offset, lin_pos_y.max() + offset)
 
     # get event times of df
-    event_filtered_data = subject_epoch_data_filtered_seg[
-        (subject_epoch_data_filtered_seg.time >= event_start_t)
-        & (subject_epoch_data_filtered_seg.time <= event_stop_t)
-    ]
-    # plot event actual and mental positions
-    color_times = event_filtered_data.time - event_start_t
+    event_filtered_data = filter_by_time_range(
+        subject_epoch_data_filtered_seg, event_start_t, event_stop_t
+    )
+    event_2d_pos = tuple(
+        event_filtered_data[
+            ["actual_2d_x_projected_position", "actual_2d_y_projected_position"]
+        ].T.values
+    )
 
     # create custom colormap
-    #             colors = ['slateblue', 'dodgerblue', 'mediumseagreen', 'greenyellow', 'lightyellow']
-    #             custom_cmap = LinearSegmentedColormap.from_list('custom_viridis', colors)
-    new_cmap = plt.get_cmap("PuBu")(np.linspace(0.3, 1, 100))  # .3,1,100))
-    custom_cmap = LinearSegmentedColormap.from_list("custom_PuBu", new_cmap)
+    custom_cmap = LinearSegmentedColormap.from_list(
+        "custom_PuBu", plt.get_cmap("PuBu")(np.linspace(0.3, 1, 100))
+    )
 
     # plot nonlocal actual and mental pos
-    scatter1 = axes[0].scatter(
-        event_filtered_data["actual_2d_x_projected_position"],
-        event_filtered_data["actual_2d_y_projected_position"],
+    axes[0].scatter(
+        *event_2d_pos,
         s=35,
         marker="o",
-        facecolors="none",
-        c="magenta",
+        c="magenta",  # facecolors="none",
         label="Rat pos.",
-    )  # c=color_times, cmap='RdPu',  )
-    scatter2 = axes[0].scatter(
-        event_filtered_data["mental_2d_x_projected_position"],
-        event_filtered_data["mental_2d_y_projected_position"],
+    )
+    axes[0].scatter(
+        *event_2d_pos,
         s=50,
         marker="o",
-        facecolors="none",
-        c=color_times,
+        c=event_filtered_data.time - event_start_t,
         cmap=custom_cmap if nonlocal_cmap == "custom" else default_cmap,
         label="Represented\nnon-local pos.",
         vmin=0,
@@ -251,61 +176,29 @@ def plot_event_v3_1_mua_ahbeh_speed(
     # legend for actual and mental pos
     legend = axes[0].legend(
         bbox_to_anchor=(-0.03, 0.5), loc="lower left", frameon=False
-    )  # -.22, .15, or for uualy spotin upper left ish -.22 and .55 is nice
-    text_colors = ["dimgrey", "magenta", shading_named_color]  # slateblue
+    )
+    text_colors = ["dimgrey", "magenta", shading_named_color]
     for label, color in zip(legend.get_texts(), text_colors):
         label.set_color(color)
 
-    cbar_ax2 = fig.add_axes(
-        [0.45, 0.48, 0.15, 0.02]
-    )  # x as .08 or .45 works nicely too #left bottom width height # i like .45, .42,.15,.01
-    #     cbar2 = plt.colorbar(scatter2, cax=cbar_ax2, orientation='horizontal')
-    # match cbars fuly
-    norm = mcolors.Normalize(vmin=0, vmax=duration)
-    scatter2bar = cm.ScalarMappable(norm=norm, cmap=custom_cmap)
-    cbar2 = plt.colorbar(scatter2bar, cax=cbar_ax2, orientation="horizontal")
+    add_colorbar(
+        fig, duration, shading_named_color, custom_cmap, show_cbar_ticks
+    )
 
-    cbar2.set_label(f"ms", color=shading_named_color, alpha=1)
-    cbar2.outline.set_visible(False)
-    cbar2.ax.spines["left"].set_visible(False)
-    cbar2.ax.tick_params(color=shading_named_color)  # , alpha=.5) #slateblue
-    print(duration)
-    cbar2.set_ticks([0, duration])
-    cbar2.set_ticklabels([0, int(np.round(1000 * duration, 0))])
-    #     cbar2.ax.spines['bottom'].set_visible(False)
-    if show_cbar_ticks == False:
-        cbar2.ax.xaxis.set_ticks_position("none")
-    for label in cbar2.ax.get_xticklabels():
-        label.set_color(shading_named_color)  # slateblue
-
-    # trial_times = acausal_results_summary.iloc[time_slice].index  - acausal_results_summary.iloc[time_slice].index.values[0]
-
+    # filter by snippet time range
     snippet_time_start = event_start_t - peri_nonlocal_time
     snippet_time_stop = event_stop_t + peri_nonlocal_time
-
+    snippet_duration = snippet_time_stop - snippet_time_start
     snippet_times = (
         acausal_results_summary.loc[snippet_time_start:snippet_time_stop].index
         - snippet_time_start
-    )  # the array of x axis times
-    print(len(snippet_times))
+    )
+    snip_kwargs = dict(  # for filter_by_time_range function
+        start=snippet_time_start, stop=snippet_time_stop, filter_col="index"
+    )
 
-    # or use .loc instead??
-    mua_snippet = mua.firing_rate[
-        (mua.firing_rate.index >= snippet_time_start)
-        & (mua.firing_rate.index <= snippet_time_stop)
-    ]
-    mua_tet_snippet = acausal_results_summary.multiunit_firing_rate[
-        (acausal_results_summary.multiunit_firing_rate.index >= snippet_time_start)
-        & (acausal_results_summary.multiunit_firing_rate.index <= snippet_time_stop)
-    ]
-    head_speed_snippet = acausal_results_summary.head_speed[
-        (acausal_results_summary.head_speed.index >= snippet_time_start)
-        & (acausal_results_summary.head_speed.index <= snippet_time_stop)
-    ]
-    ahbeh_snippet = acausal_results_summary.ahead_behind_distance[
-        (acausal_results_summary.ahead_behind_distance.index >= snippet_time_start)
-        & (acausal_results_summary.ahead_behind_distance.index <= snippet_time_stop)
-    ]
+    if debug:
+        print(len(snippet_times))
 
     # for ahebeh actually only want the hpd valid times
     if extra_hpd:
@@ -313,19 +206,14 @@ def plot_event_v3_1_mua_ahbeh_speed(
             acausal_results_summary.spatial_coverage_50_hpd <= 50
         ]
         snippet_times_hpd = (
-            acausal_results_summary_hpd.loc[snippet_time_start:snippet_time_stop].index
+            acausal_results_summary_hpd.loc[
+                snippet_time_start:snippet_time_stop
+            ].index
             - snippet_time_start
         )
-        ahbeh_snippet_hpd = acausal_results_summary_hpd.ahead_behind_distance[
-            (
-                acausal_results_summary_hpd.ahead_behind_distance.index
-                >= snippet_time_start
-            )
-            & (
-                acausal_results_summary_hpd.ahead_behind_distance.index
-                <= snippet_time_stop
-            )
-        ]
+        ahbeh_snippet_hpd = filter_by_time_range(
+            df=acausal_results_summary_hpd.ahead_behind_distance, **snip_kwargs
+        )
         axes[2].scatter(
             snippet_times_hpd,
             ahbeh_snippet_hpd,
@@ -333,58 +221,65 @@ def plot_event_v3_1_mua_ahbeh_speed(
             alpha=1,
             s=4,
             zorder=5000,
-        )  #'darkgrey'
+        )
     else:
-        axes[2].scatter(snippet_times, ahbeh_snippet, color="darkgrey", alpha=1, s=4)
-    axes[2].set_ylabel(
-        f"cm",
-    )  # rotation=0)
-    axes[2].axhline(0, color="magenta", alpha=0.3, linewidth=1, zorder=0, linestyle="-")
+        ahbeh_snippet = filter_by_time_range(
+            df=acausal_results_summary.ahead_behind_distance, **snip_kwargs
+        )
+        axes[2].scatter(
+            snippet_times, ahbeh_snippet, color="darkgrey", alpha=1, s=4
+        )
 
-    # ymin2,ymax2 = axes[2].get_ylim()
+    axes[2].set_ylabel("cm")
+    axes[2].axhline(
+        0, color="magenta", alpha=0.3, linewidth=1, zorder=0, linestyle="-"
+    )
 
-    print(len(mua_snippet))
     # mua old style which avgs across tets, new one sums
     if mua is not None:
-        axes[1].fill_between(snippet_times, mua_snippet, color="dimgrey", alpha=1)
+        mua_snippet = filter_by_time_range(df=mua.firing_rate, **snip_kwargs)
+        axes[1].fill_between(
+            snippet_times, mua_snippet, color="dimgrey", alpha=1
+        )
     else:
-        axes[1].fill_between(snippet_times, mua_tet_snippet, color="darkgrey", alpha=1)
+        mua_tet_snippet = filter_by_time_range(
+            df=acausal_results_summary.multiunit_firing_rate, **snip_kwargs
+        )
+        axes[1].fill_between(
+            snippet_times, mua_tet_snippet, color="darkgrey", alpha=1
+        )
+
     axes[1].set_ylabel("MUA\n(spikes/s)")
     _, ymax = axes[1].get_ylim()
     ymax1 = int(np.ceil(ymax / 100.0)) * 100
-    #     if ymax1 < 500:
-    #         ymax1=500
     axes[1].set_ylim([0, ymax1])
     axes[1].set_yticks([0, ymax1])
-    #     axes[1].set_yticklabels([0,ymax1])
 
-    axes[3].fill_between(snippet_times, head_speed_snippet, color="darkgrey", alpha=1)
+    head_speed_snippet = filter_by_time_range(
+        df=acausal_results_summary.head_speed, **snip_kwargs
+    )
+    axes[3].fill_between(
+        snippet_times, head_speed_snippet, color="darkgrey", alpha=1
+    )
     axes[3].set_ylabel("Speed\n(cm/s)")
     axes[3].set_xlabel("Time (s)", labelpad=6)
 
     shaded_times = (
         acausal_results_summary.loc[event_start_t:event_stop_t].index
         - snippet_time_start
-    )  # event_filtered_data.time - snippet_time_start
+    )
 
-    _, ymax3 = axes[3].get_ylim()
-    if ymax3 <= 55:
-        ymax3 = 55
-        axes[3].set_ylim(0, ymax3)
-    #     axes[1].vlines(shaded_times, ymin=0, ymax=ymax1, color=shading_named_color, alpha =.2, zorder=-100) #lw=2,) # zorder=0)
-    #     axes[3].vlines(shaded_times, ymin=0, ymax=ymax3, color=shading_named_color, alpha =.2, zorder=-100 ) #lw=2, ) #zorder=0)
-    #     axes[2].vlines(shaded_times, ymin=ymin2, ymax=ymax2, color=shading_named_color, alpha =.2, zorder=-100) #lw=2,) # zorder=0)
-    #     print(len(shaded_times),shaded_times[0],shaded_times[-1])
+    if axes[3].get_ylim()[1] <= 55:
+        axes[3].set_ylim(0, 55)
 
     axes[1].axvspan(
         shaded_times[0],
         shaded_times[-1],
         ymin=0,
         ymax=1,
-        color=shading_named_color,
+        color=shading_named_color,  # edgecolor="none",
         alpha=0.5,
         zorder=-100,
-        edgecolor="none",
         linestyle="None",
     )
     axes[3].axvspan(
@@ -392,10 +287,9 @@ def plot_event_v3_1_mua_ahbeh_speed(
         shaded_times[-1],
         ymin=0,
         ymax=1,
-        color=shading_named_color,
+        color=shading_named_color,  # edgecolor="none",
         alpha=0.5,
         zorder=-100,
-        edgecolor="none",
         linestyle="None",
     )
     axes[2].axvspan(
@@ -403,28 +297,23 @@ def plot_event_v3_1_mua_ahbeh_speed(
         shaded_times[-1],
         ymin=0,
         ymax=1,
-        color=shading_named_color,
+        color=shading_named_color,  # edgecolor="none",
         alpha=0.5,
         zorder=-100,
-        edgecolor="none",
         linestyle="None",
     )
 
-    axes[1].set_xlim(0, snippet_time_stop - snippet_time_start)
+    axes[1].set_xlim(0, snippet_duration)
     axes[1].set_xticks([])
-    axes[1].set_xticklabels(
-        [],
-    )
+    axes[1].set_xticklabels([])
     axes[1].set_xlabel("")
 
-    axes[2].set_xlim(0, snippet_time_stop - snippet_time_start)
+    axes[2].set_xlim(0, snippet_duration)
     axes[2].set_xticks([])
-    axes[2].set_xticklabels(
-        [],
-    )
+    axes[2].set_xticklabels([])
     axes[2].set_xlabel("")
 
-    axes[3].set_xlim(0, snippet_time_stop - snippet_time_start)
+    axes[3].set_xlim(0, snippet_duration)
     axes[3].set_ylim(bottom=0)
 
     for ax in axes.flat:
@@ -446,7 +335,16 @@ def plot_event_v3_1_mua_ahbeh_speed(
     axes[3].set_position([new_left, pos_ax3.y0, new_width, pos_ax3.height])
 
     if save_fig:
-        fig_name = f"snippet_ex_decode_MUA_AHBEH_first{is_first_seg_of_trial}_{nwb_file_name[0:-5]}_{epoch}_{trial}_event{e}_mindur{min_nonlocal_duration_s}_binbuff{between_bin_buffer_s}_perievent{peri_nonlocal_time}_shade{shading_named_color}_{event_start_t}_{event_stop_t}"
+        fig_name = (
+            f"snippet_ex_decode_MUA_AHBEH_first{is_first_seg_of_trial}_"
+            + f"{nwb_file_name[0:-5]}_{epoch}_{trial}"
+            + f"_event{event_num_in_trial}_"
+            + f"mindur{min_nonlocal_duration_s}_"
+            + f"binbuff{between_bin_buffer_s}_"
+            + f"perievent{peri_nonlocal_time}_"
+            + f"shade{shading_named_color}_{event_start_t}_{event_stop_t}"
+        )
+
         plt.savefig(
             f"{fig_path}{fig_name}.pdf",
             format="pdf",
@@ -458,8 +356,162 @@ def plot_event_v3_1_mua_ahbeh_speed(
     plt.show()
 
 
+def add_colorbar(
+    fig, duration, shading_named_color, custom_cmap, show_cbar_ticks
+):
+    """Add a colorbar to the figure."""
+    cbar_ax2 = fig.add_axes([0.45, 0.48, 0.15, 0.02])
+    norm = mcolors.Normalize(vmin=0, vmax=duration)
+    scatter2bar = cm.ScalarMappable(norm=norm, cmap=custom_cmap)
+    cbar2 = plt.colorbar(scatter2bar, cax=cbar_ax2, orientation="horizontal")
+
+    cbar2.set_label("ms", color=shading_named_color, alpha=1)
+    cbar2.outline.set_visible(False)
+    cbar2.ax.spines["left"].set_visible(False)
+    cbar2.ax.tick_params(color=shading_named_color)
+
+    if not show_cbar_ticks:
+        cbar2.ax.xaxis.set_ticks_position("none")
+
+    cbar2.set_ticks([0, duration])
+    cbar2.set_ticklabels([0, int(np.round(1000 * duration, 0))])
+
+    for label in cbar2.ax.get_xticklabels():
+        label.set_color(shading_named_color)
+
+
+def add_scale_bar(
+    axes,
+    tick_length=3,
+    x_start=200,
+    y_position=58,
+    scale_bar_length=25,
+    color="lightgrey",
+):
+    """Add a scale bar to the plot, and label it."""
+    axes.plot(
+        [x_start, x_start + scale_bar_length],
+        [y_position, y_position],
+        color=color,
+        lw=1,
+    )
+    axes.text(
+        x_start + scale_bar_length / 2,
+        y_position - 6,
+        f"{scale_bar_length} cm",
+        ha="center",
+        va="top",
+        color=color,
+    )
+    axes.plot(
+        [x_start, x_start],
+        [y_position - tick_length, y_position + tick_length * 0],
+        color=color,
+        lw=1,
+    )
+    axes.plot(
+        [x_start + scale_bar_length, x_start + scale_bar_length],
+        [y_position - tick_length, y_position + tick_length * 0],
+        color=color,
+        lw=1,
+    )
+
+
+def plot_track_and_trial_path(
+    axes, lin_pos_x, lin_pos_y, time_slice, arrow_color
+):
+    """Plot the track and trial path on the main axes."""
+    axes.scatter(
+        lin_pos_x.iloc[::50],
+        lin_pos_y.iloc[::50],
+        s=50,
+        color="lightgrey",
+        zorder=0,
+        label="_",
+    )
+    axes.plot(
+        lin_pos_x.iloc[time_slice],
+        lin_pos_y.iloc[time_slice],
+        color=arrow_color,
+        lw=1,
+        zorder=1,
+        label="Trial path",
+        linestyle="--",
+    )
+
+    # Draw arrow to indicate motion direction over last 50 points
+    arrow_start = (
+        lin_pos_x.iloc[time_slice].values[-50],
+        lin_pos_y.iloc[time_slice].values[-50],
+    )
+    arrow_end = (
+        lin_pos_x.iloc[time_slice].values[-1],
+        lin_pos_y.iloc[time_slice].values[-1],
+    )
+    arrow = FancyArrowPatch(
+        arrow_start,
+        arrow_end,
+        arrowstyle="-|>",
+        color=arrow_color,
+        lw=1,
+        mutation_scale=15,
+        zorder=20000,
+    )
+    axes.add_patch(arrow)
+    axes.set_aspect("equal")
+
+
+def extract_event_range(event_dict, use_manual=True):
+    """Get event start and stop times from event_dict."""
+    e_start_col, e_stop_col = "event_start_t", "event_stop_t"
+    if use_manual:  # if use_manual, cols are 'event_{X}_t_manual'
+        e_start_col += "_manual"
+        e_stop_col += "_manual"
+    return event_dict[e_start_col], event_dict[e_stop_col]
+
+
+def filter_epoch_data_by_event(
+    event_dict, subject_epoch_data, position_df, debug=False
+):
+    """Filter subject epoch data based on event and position time ranges."""
+    time_slice = slice(
+        event_dict["time_slice_start"], event_dict["time_slice_stop"]
+    )
+    start_t, stop_t = position_df.iloc[time_slice].index[[0, -1]]
+
+    subject_epoch_data = subject_epoch_data.reset_index()
+    subject_epoch_data_filtered = filter_by_time_range(
+        df=subject_epoch_data, start=start_t, stop=stop_t
+    )
+
+    is_first_seg_of_trial = event_dict["is_first_seg_of_trial"]
+    is_last_seg_of_trial = event_dict["is_last_seg_of_trial"]
+
+    if not is_first_seg_of_trial ^ is_last_seg_of_trial:
+        raise ValueError(
+            "only first OR last seg can be true, and one must be true"
+        )
+
+    trial_mask = (
+        subject_epoch_data_filtered.is_first_seg_of_trial
+        if is_first_seg_of_trial
+        else subject_epoch_data_filtered.is_last_seg_of_trial
+    )
+    subject_epoch_data_filtered_seg = subject_epoch_data_filtered[trial_mask]
+
+    if debug:
+        filtered_start, filtered_end = (
+            subject_epoch_data_filtered_seg.time.iloc[[0, -1]]
+        )
+        print(f"Filtered time range: {filtered_start} to {filtered_end}")
+
+    return subject_epoch_data_filtered_seg
+
+
 def get_multiunit_population_firing_rate_sum(
-    multiunit, sampling_frequency, smoothing_sigma=0.015
+    multiunit: np.ndarray,
+    sampling_frequency: float,
+    smoothing_sigma: float = 0.015,
 ):
     """Calculates the multiunit population firing rate.
 
@@ -473,26 +525,23 @@ def get_multiunit_population_firing_rate_sum(
         Amount to smooth the firing rate over time. The default is
         given assuming time is in units of seconds.
 
-
     Returns
     -------
     multiunit_population_firing_rate : ndarray, shape (n_time,)
-
     """
     return gaussian_smooth(
-        multiunit.sum(axis=1) * sampling_frequency, smoothing_sigma, sampling_frequency
+        multiunit.sum(axis=1) * sampling_frequency,
+        smoothing_sigma,
+        sampling_frequency,
     )
 
 
-def _summarize_mua_sum(key, marks_xr):
-    SAMPLING_FREQUENCY = key["sampling_rate"]  # should be 500 basically always rn
-    multiunit_spikes = (np.any(~np.isnan(marks_xr.values), axis=1)).astype(float)
-    multiunit_firing_rate = pd.DataFrame(
-        get_multiunit_population_firing_rate_sum(multiunit_spikes, SAMPLING_FREQUENCY),
-        index=marks_xr.time,
-        columns=["firing_rate"],
-    )
-    return multiunit_firing_rate  # .to_numpy().flatten()
+def filter_by_time_range(
+    df: pd.DataFrame, start: float, stop: float, filter_col: str = "time"
+) -> pd.DataFrame:
+    """Filter a DataFrame by a time range."""
+    this_col = df.index if filter_col == "index" else df[filter_col]
+    return df[(this_col >= start) & (this_col <= stop)]
 
 
 def gaussian_smooth(data, sigma, sampling_frequency, axis=0, truncate=8):
@@ -517,5 +566,9 @@ def gaussian_smooth(data, sigma, sampling_frequency, axis=0, truncate=8):
 
     """
     return gaussian_filter1d(
-        data, sigma * sampling_frequency, truncate=truncate, axis=axis, mode="constant"
+        data,
+        sigma * sampling_frequency,
+        truncate=truncate,
+        axis=axis,
+        mode="constant",
     )
