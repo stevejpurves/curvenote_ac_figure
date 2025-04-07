@@ -1,0 +1,16 @@
+name: nwb-explore
+channels:
+  - conda-forge
+  - default
+dependencies:
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - pynwb
+  - hpy5
+  - jupyterlab
+  - pip
+  - pip:
+    - nwbwidgets
+
