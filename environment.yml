@@ -3,13 +3,15 @@ channels:
   - conda-forge
   - default
 dependencies:
+  - python=3.11
   - numpy
   - pandas
   - matplotlib
   - seaborn
   - pynwb
-  - hpy5
+  - h5py
   - jupyterlab
+  - ipython_genutils
   - pip
   - pip:
     - nwbwidgets

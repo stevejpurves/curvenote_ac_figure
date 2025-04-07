@@ -10,7 +10,8 @@ from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import FancyArrowPatch
 
 MM_TO_INCHES = 1.0 / 25.4
-TWO_COLUMN = 174.0 * MM_TO_INCHES
+# TWO_COLUMN = 174.0 * MM_TO_INCHES
+TWO_COLUMN = 500.0 * MM_TO_INCHES
 
 ARROW_MUTATION_SCALE = 15
 AXIS_OFFSET = 10
@@ -167,7 +168,7 @@ def plot_event_v3_1_mua_ahbeh_speed(
         heading
         + f"\nNon-local event example, duration {np.round(duration*1000,2)} ms",
         y=1.0,
-        fontsize=4,
+        fontsize=14,
     )
 
     if debug:
